@@ -3,4 +3,4 @@ data/
 figures/
 log/
 .idea/
-ipy/*.csv
+*.csv

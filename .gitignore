@@ -1,6 +1,11 @@
 news/
+news2/
+news-bak/
 data/
+checkout/
 figures/
+output/
+output0331/
 log/
 .idea/
 *.csv

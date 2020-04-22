@@ -9,6 +9,7 @@ import scrapy
 from scrapy import Field
 
 class EastmoneyItem(scrapy.Item):
+    symbol = Field()
     url = Field()
     title = Field()
     content = Field()

@@ -14,6 +14,7 @@ class EastmoneyItem(scrapy.Item):
     title = Field()
     content = Field()
     date = Field()
+    trade_date = Field()
     time = Field()
     read = Field()
     comment = Field()

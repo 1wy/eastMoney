@@ -26,8 +26,8 @@ class EastMoneyPipeline(object):
         self.engine = create_engine('mysql://wy:,.,.,l@10.24.224.249/webdata?charset=utf8')
 
     def process_item(self, item, spider):
-        df = pd.DataFrame([[item['symbol'],item['date'],item['time'],item['title'],item['content'],item['comment'],item['read'],item['url'],'00000000']],
-        	columns=['S_INFO_WINDCODE', 'DATE', 'TIME', 'TITLE', 'CONTENT', 'COMMENTNUM', 'READNUM', 'URL','TRADE_DT'])
+        df = pd.DataFrame([[item['symbol'],item['trade_date'],item['date'],item['time'],item['title'],item['content'],item['comment'],item['read'],item['url']]],
+        	columns=['S_INFO_WINDCODE', 'TRADE_DT','DATE', 'TIME', 'TITLE', 'CONTENT', 'COMMENTNUM', 'READNUM', 'URL'])
         #try:
         df.to_sql(name='EastMoney', con=self.engine, if_exists='append', index=False)
         #except:

@@ -10,6 +10,7 @@ from ..items import EastmoneyItem
 from time import sleep
 import pandas as pd
 from sqlalchemy import create_engine
+import datetime 
 
 class GubaOnlineSpider(scrapy.Spider):
     name = 'guba_online'
@@ -47,7 +48,19 @@ class GubaOnlineSpider(scrapy.Spider):
         df_record = pd.read_sql(sql,engine)
         self.last_URL = max([int(url.split(',')[-1]) for url in df_record['URL']])
         #logging.warning(str(self.last_URL) + '\nokkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk!')
-        
+        today = datetime.datetime.now()
+        date_begin = (today + datetime.timedelta(days=-90)).strftime('%Y%m%d')
+        date_end = (today + datetime.timedelta(days=30)).strftime('%Y%m%d')
+        engine = create_engine('mysql://wy:,.,.,l@10.24.224.249/wind?charset=utf8')
+        trade_days = pd.read_sql('select TRADE_DAYS from MyAShareCalendar where S_INFO_EXCHMARKET="SSE" order by TRADE_DAYS',engine).rename(columns={'TRADE_DAYS':'TRADE_DT'})
+        trade_days['date'] = trade_days['TRADE_DT']
+        self.all_date = pd.DataFrame({'date':[str(d)[:10].replace('-','') for d in pd.date_range(date_begin,date_end)]})
+        self.all_date = self.all_date.merge(trade_days[['date','TRADE_DT']],how='left')
+        self.all_date['TRADE_DT'] = self.all_date['TRADE_DT'].bfill()
+        self.all_date['next_date'] = self.all_date['TRADE_DT'].shift(-1)
+        self.all_date['next_date'] = self.all_date['date'].shift(-1)
+        self.all_date = self.all_date.set_index('date')
+
         record_num = len(df_record)
         crawled_pages = record_num // 80 # the web display the news 80 lines per page
         start_page = max(crawled_pages,1)
@@ -80,6 +93,8 @@ class GubaOnlineSpider(scrapy.Spider):
         datetime = response.xpath('//div[@class="zwfbtime"]/text()').extract_first()
         item['date'] = datetime.split()[1].replace('-','')
         item['time'] = datetime.split()[2]
+        item['trade_date'] = self.all_date.loc[item['date'],'next_date'] if (item['time']>'15:00:00') else item['date']
+        item['trade_date'] = self.all_date.loc[item['trade_date'],'TRADE_DT']
         item['title'] = response.xpath('//div[@id="zwconttbt"]/text()').extract_first().strip()
         item['content'] = " ".join(response.xpath('//div[@id="zwconbody"]//p/text()').extract())
         yield item

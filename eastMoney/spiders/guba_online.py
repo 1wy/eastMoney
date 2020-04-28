@@ -11,6 +11,7 @@ from time import sleep
 import pandas as pd
 from sqlalchemy import create_engine
 import datetime 
+import random
 
 class GubaOnlineSpider(scrapy.Spider):
     name = 'guba_online'
@@ -24,35 +25,50 @@ class GubaOnlineSpider(scrapy.Spider):
         # obtain the number of pages
         subpage_url = 'http://gb.eastmoney.com/list,%s,1,f_{}.html' % symbol[:6]
         pageresponse = requests.post(self.base_url)
+        self.tot_msg_num = 0
+        self.num_per_page = 80
         if not Selector(text=pageresponse.text).xpath('//div[@class="noarticle"]').extract_first() is None:
             numpage = 0
         else:
             pageresponse_text = Selector(text=pageresponse.text).xpath('//span[@class="pagernums"]').extract_first()
-            numpage = math.ceil(int(pageresponse_text.split('|')[-3]) / int(pageresponse_text.split('|')[-2]))
+            self.tot_msg_num = int(pageresponse_text.split('|')[-3])
+            self.num_per_page = int(pageresponse_text.split('|')[-2])
+            numpage = math.ceil(self.tot_msg_num / self.num_per_page)
 
         stockname = Selector(text=pageresponse.text).xpath('//*[@id="stockname"]/a/@href').extract_first()
         if not stockname is None:
             stockname = stockname.split(',')[-1].split('.')[0]
             logging.warning(stockname)
             if stockname != symbol[:6]:
-                self.start_urls=[]
-                return
+                raise 
         else:
             self.start_urls=[]
             return
-        #self.start_urls=[]
-        #return
         # obtain the records number and the last new's time
-        engine = create_engine('mysql://wy:,.,.,l@10.24.224.249/webdata?charset=utf8')
+        mysql_conn1 = create_engine('mysql://wy:,.,.,l@10.24.224.249/webdata?charset=utf8')
         sql = 'select S_INFO_WINDCODE, URL from EastMoney where S_INFO_WINDCODE=\'' + symbol + '\''
-        df_record = pd.read_sql(sql,engine)
-        self.last_URL = max([int(url.split(',')[-1]) for url in df_record['URL']])
+        df_record = pd.read_sql(sql,mysql_conn1)
+        if len(df_record) ==0:
+            self.last_URL = -1
+        else:
+            self.last_URL = max([int(url.split(',')[-1]) for url in df_record['URL']])
+        
+        # set proxy to avoid forbiddance 
+
+        proxys = pd.read_sql('select ip from Proxy where score>0', mysql_conn1)['ip'].values
+        sel_proxy = random.choice(proxys)
+        if sel_proxy[:3] == '127':
+            self.proxy = None
+        else:
+            self.proxy = 'https://wangxwang:898990@%s' % sel_proxy
+
+
         #logging.warning(str(self.last_URL) + '\nokkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk!')
         today = datetime.datetime.now()
         date_begin = (today + datetime.timedelta(days=-90)).strftime('%Y%m%d')
         date_end = (today + datetime.timedelta(days=30)).strftime('%Y%m%d')
-        engine = create_engine('mysql://wy:,.,.,l@10.24.224.249/wind?charset=utf8')
-        trade_days = pd.read_sql('select TRADE_DAYS from MyAShareCalendar where S_INFO_EXCHMARKET="SSE" order by TRADE_DAYS',engine).rename(columns={'TRADE_DAYS':'TRADE_DT'})
+        mysql_conn2 = create_engine('mysql://wy:,.,.,l@10.24.224.249/wind?charset=utf8')
+        trade_days = pd.read_sql('select TRADE_DAYS from MyAShareCalendar where S_INFO_EXCHMARKET="SSE" order by TRADE_DAYS',mysql_conn2).rename(columns={'TRADE_DAYS':'TRADE_DT'})
         trade_days['date'] = trade_days['TRADE_DT']
         self.all_date = pd.DataFrame({'date':[str(d)[:10].replace('-','') for d in pd.date_range(date_begin,date_end)]})
         self.all_date = self.all_date.merge(trade_days[['date','TRADE_DT']],how='left')
@@ -61,9 +77,10 @@ class GubaOnlineSpider(scrapy.Spider):
         self.all_date['next_date'] = self.all_date['date'].shift(-1)
         self.all_date = self.all_date.set_index('date')
 
-        record_num = len(df_record)
-        crawled_pages = record_num // 80 # the web display the news 80 lines per page
+        self.record_num = len(df_record)
+        crawled_pages = self.record_num // self.num_per_page # the web display the news 80 lines per page
         start_page = max(crawled_pages,1)
+
 
         for i in range(numpage-start_page+1,0,-1):
             self.start_urls.append(subpage_url.format(i))
@@ -76,6 +93,11 @@ class GubaOnlineSpider(scrapy.Spider):
             item = EastmoneyItem()
             read_str = article.xpath('.//span[@class="l1 a1"]/text()').extract_first()
             item['symbol'] = self.symbol
+            read_str = article.xpath('.//span[@class="l1 a1"]/text()').extract_first()
+            item['symbol'] = self.symbol
+            item = EastmoneyItem()
+            read_str = article.xpath('.//span[@class="l1 a1"]/text()').extract_first()
+            item['symbol'] = self.symbol
             item['read'] = str((int(bool(re.search('万',read_str)))*9999+1)*float(read_str.replace('万','')))
             item['comment'] = article.xpath('.//span[@class="l2 a2"]/text()').extract_first()
             detail_url_part = article.xpath('.//span[@class="l3 a3"]/a/@href').extract_first()
@@ -84,9 +106,9 @@ class GubaOnlineSpider(scrapy.Spider):
             item['url'] = detail_url_part[1:-5]
             if url_id <= self.last_URL:
                 continue
-            yield scrapy.Request(detail_url, callback=self.parse1, meta={'item':item})
-            sleep(0.1)
-        sleep(1)
+            yield scrapy.Request(detail_url, callback=self.parse1, meta={'proxy':self.proxy,'item':item})
+            #sleep(0.01)
+        #sleep(1)
 
     def parse1(self, response):
         item = response.meta['item']
@@ -98,4 +120,3 @@ class GubaOnlineSpider(scrapy.Spider):
         item['title'] = response.xpath('//div[@id="zwconttbt"]/text()').extract_first().strip()
         item['content'] = " ".join(response.xpath('//div[@id="zwconbody"]//p/text()').extract())
         yield item
-

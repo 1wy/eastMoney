@@ -5,11 +5,17 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://doc.scrapy.org/en/latest/topics/item-pipeline.html
 import os
+import re
 import pymysql
 import logging
 import pandas as pd
 from sqlalchemy import create_engine
 import datetime
+from time import time
+
+NONSENSE=['融资融券信息','融资净偿还','融资净买入','融券净偿还','大宗交易','今日超大单流','龙虎榜','下跌','上涨','跌幅',
+          '涨幅','涨停','跌停','大涨','大跌','跳水','盘中','融资余额','反弹','回调','火箭发射','投资者关系']
+
 class EastMoneyPipeline(object):
     def __init__(self):
         # 连接数据库
@@ -28,25 +34,17 @@ class EastMoneyPipeline(object):
         self.date = datetime.datetime.now().strftime('%Y-%m-%d')
 
     def process_item(self, item, spider):
-        df = pd.DataFrame([[item['symbol'],item['trade_date'],item['date'],item['time'],item['title'],item['content'],item['comment'],item['read'],item['url']]],
-        	columns=['S_INFO_WINDCODE', 'TRADE_DT','DATE', 'TIME', 'TITLE', 'CONTENT', 'COMMENTNUM', 'READNUM', 'URL'])
+        t1 = time()
+
+        is_useful = int(not ((len(item['title'].strip())==0) or any([bool(re.search(w,item['title'])) for w in NONSENSE]) ))
+        # is_useful = 'true' if is_useful else 'false'
+        df = pd.DataFrame([[item['symbol'],item['trade_date'],item['date'],item['time'],item['title'],item['content'],item['comment'],item['read'],item['url'],is_useful]],
+        	columns=['S_INFO_WINDCODE', 'TRADE_DT','DATE', 'TIME', 'TITLE', 'CONTENT', 'COMMENTNUM', 'READNUM', 'URL','USEFUL'])
         #try:
         df.to_sql(name='EastMoney', con=self.mysql_conn, if_exists='append', index=False)
         self.inc_cnt += 1
         self.symbol = item['symbol']
-        #except:
-        #    pass
-        # self.cursor.execute(
-        #     """insert ignore into EastMoney(S_INFO_WINDCODE, DATE, TIME, TITLE, CONTENT, COMMENTNUM, READNUM)
-        #     value (%s, %s, %s, %s, %s, %s, %s)""",  # 纯属python操作mysql知识，不熟悉请恶补
-        #     (item['symbol'],  # item里面定义的字段和表字段对应
-        #      item['date'],
-        #      item['time'],
-        #      item['title'],
-        #      item['content'],
-        #      item['comment'],
-        #      item['read']))
-        # 提交sql语句
+        t2 = time()
         return item  # 必须实现返回
     
     def open_spider(self, spider):

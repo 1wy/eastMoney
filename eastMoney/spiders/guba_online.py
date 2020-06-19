@@ -12,6 +12,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 import datetime 
 import random
+from time import time
 
 class GubaOnlineSpider(scrapy.Spider):
     name = 'guba_online'
@@ -22,6 +23,7 @@ class GubaOnlineSpider(scrapy.Spider):
         self.base_url = 'http://gb.eastmoney.com/list,%s,1,f.html' % symbol[:6]
         self.start_urls = [self.base_url]
         self.symbol = symbol
+        t1 = time()
         # obtain the number of pages
         subpage_url = 'http://gb.eastmoney.com/list,%s,1,f_{}.html' % symbol[:6]
         pageresponse = requests.post(self.base_url)
@@ -44,6 +46,7 @@ class GubaOnlineSpider(scrapy.Spider):
         else:
             self.start_urls=[]
             return
+        t2 = time()
         # obtain the records number and the last new's time
         mysql_conn1 = create_engine('mysql://wy:,.,.,l@10.24.224.249/webdata?charset=utf8')
         sql = 'select S_INFO_WINDCODE, URL from EastMoney where S_INFO_WINDCODE=\'' + symbol + '\''
@@ -52,7 +55,7 @@ class GubaOnlineSpider(scrapy.Spider):
             self.last_URL = -1
         else:
             self.last_URL = max([int(url.split(',')[-1]) for url in df_record['URL']])
-        
+        t3 = time()
         # set proxy to avoid forbiddance 
 
         proxys = pd.read_sql('select ip from Proxy where score>0', mysql_conn1)['ip'].values
@@ -62,7 +65,7 @@ class GubaOnlineSpider(scrapy.Spider):
         else:
             self.proxy = 'https://wangxwang:898990@%s' % sel_proxy
 
-
+        t4 = time()
         #logging.warning(str(self.last_URL) + '\nokkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk!')
         today = datetime.datetime.now()
         date_begin = (today + datetime.timedelta(days=-90)).strftime('%Y%m%d')
@@ -73,7 +76,7 @@ class GubaOnlineSpider(scrapy.Spider):
         self.all_date = pd.DataFrame({'date':[str(d)[:10].replace('-','') for d in pd.date_range(date_begin,date_end)]})
         self.all_date = self.all_date.merge(trade_days[['date','TRADE_DT']],how='left')
         self.all_date['TRADE_DT'] = self.all_date['TRADE_DT'].bfill()
-        self.all_date['next_date'] = self.all_date['TRADE_DT'].shift(-1)
+        # self.all_date['next_date'] = self.all_date['TRADE_DT'].shift(-1)
         self.all_date['next_date'] = self.all_date['date'].shift(-1)
         self.all_date = self.all_date.set_index('date')
 
@@ -81,13 +84,16 @@ class GubaOnlineSpider(scrapy.Spider):
         crawled_pages = self.record_num // self.num_per_page # the web display the news 80 lines per page
         start_page = max(crawled_pages,1)
 
-
+        t5 = time()
+        # print(t2-t1,t3-t2,t4-t3,t5-t4)
         for i in range(numpage-start_page+1,0,-1):
             self.start_urls.append(subpage_url.format(i))
+
         super().__init__(**kwargs)
 
     def parse(self, response):
-        pass
+        logging.warning(response.url)
+        logging.warning(response.meta['download_latency'])
         article_list = response.xpath('//div[@id="articlelistnew"]/div[@class="articleh normal_post"]')
         for article in article_list:
             item = EastmoneyItem()
@@ -104,13 +110,15 @@ class GubaOnlineSpider(scrapy.Spider):
             detail_url = self.base_url_prefix + detail_url_part
             url_id = int(detail_url_part[1:-5].split(',')[-1])
             item['url'] = detail_url_part[1:-5]
-            if url_id <= self.last_URL:
-                continue
-            yield scrapy.Request(detail_url, callback=self.parse1, meta={'proxy':self.proxy,'item':item})
+            if url_id > self.last_URL:
+                yield scrapy.Request(detail_url, callback=self.parse1, meta={'proxy':self.proxy,'item':item,'download_timeout': 10.0})
             #sleep(0.01)
-        #sleep(1)
+        sleep(1)
 
     def parse1(self, response):
+        logging.warning(response.url)
+        logging.warning(response.meta['download_latency'])
+        
         item = response.meta['item']
         datetime = response.xpath('//div[@class="zwfbtime"]/text()').extract_first()
         item['date'] = datetime.split()[1].replace('-','')

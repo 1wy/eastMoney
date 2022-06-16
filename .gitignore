@@ -9,4 +9,5 @@ output0331/
 log/
 .idea/
 *.csv
+*.xlsx
 nohup.out
